@@ -1,0 +1,77 @@
+name: NBA Post-Game Summary
+
+on:
+  schedule:
+    # Runs every day at 2 AM, 5 AM, 8 AM, and 11 PM UTC
+    # This covers games ending at various times throughout the day
+    - cron: '0 2,5,8,23 * * *'
+  
+  workflow_dispatch:
+    inputs:
+      team:
+        description: 'Team name (e.g., OKC Thunder, Lakers, Warriors)'
+        required: false
+        default: 'OKC Thunder'
+      stat:
+        description: 'Stat type to track'
+        required: false
+        default: '3pt'
+        type: choice
+        options:
+          - 3pt
+          - fg
+          - ft
+      days_back:
+        description: 'Days to look back for games'
+        required: false
+        default: '1'
+
+jobs:
+  send-post-game-summary:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install nba-api python-dotenv slack-sdk
+    
+    - name: Run post-game summary (scheduled)
+      if: github.event_name == 'schedule'
+      env:
+        SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        SLACK_USER_ID: ${{ secrets.SLACK_USER_ID }}
+      run: |
+        python post_game_summary.py --team "OKC Thunder" --stat 3pt --days-back 1
+    
+    - name: Run post-game summary (manual)
+      if: github.event_name == 'workflow_dispatch'
+      env:
+        SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        SLACK_USER_ID: ${{ secrets.SLACK_USER_ID }}
+      run: |
+        python post_game_summary.py --team "${{ github.event.inputs.team }}" --stat ${{ github.event.inputs.stat }} --days-back ${{ github.event.inputs.days_back }}
+    
+    - name: Commit updated notification file
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add last_notified_game.txt
+        git diff --quiet && git diff --staged --quiet || git commit -m "chore: update last notified game ID"
+        git push
