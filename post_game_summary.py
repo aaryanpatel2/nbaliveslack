@@ -101,7 +101,7 @@ def get_recent_game(team_abbr, days_back=1):
         try:
             # Added delay to avoid rate limiting
             if attempt > 0:
-                wait_time = 2 ** attempt  # Exponential backoff
+                wait_time = 5 * (attempt + 1)  # 5s, 10s delays
                 print(f"Retry attempt {attempt + 1}/{max_retries} after {wait_time}s delay...")
                 time.sleep(wait_time)
             
@@ -152,12 +152,12 @@ def get_game_stats(game_id, team_abbr, stat_type='3pt'):
     for attempt in range(max_retries):
         try:
             if attempt > 0:
-                wait_time = 2 ** attempt
+                wait_time = 5 * (attempt + 1)  # 5s, 10s delays
                 print(f"Retry attempt {attempt + 1}/{max_retries} after {wait_time}s delay...")
                 time.sleep(wait_time)
             
             print(f"Fetching live boxscore for game {game_id}, team {team_abbr}")
-            box = live_boxscore.BoxScore(game_id)
+            box = live_boxscore.BoxScore(game_id, timeout=60)
             data = box.game.get_dict()
             # Find team info
             teams = data['homeTeam'], data['awayTeam']
@@ -250,14 +250,15 @@ def main():
     for attempt in range(max_retries):
         try:
             if attempt > 0:
-                wait_time = 2 ** attempt
+                wait_time = 5 * (attempt + 1)  # 5s, 10s delays
                 print(f"Retry attempt {attempt + 1}/{max_retries} after {wait_time}s delay...")
                 time.sleep(wait_time)
             
             gamefinder = leaguegamefinder.LeagueGameFinder(
                 team_id_nullable=None,
                 date_from_nullable=date_from.strftime('%m/%d/%Y'),
-                date_to_nullable=date_to.strftime('%m/%d/%Y')
+                date_to_nullable=date_to.strftime('%m/%d/%Y'),
+                timeout=60
             )
             games = gamefinder.get_data_frames()[0]
             team_games = games[games['TEAM_ABBREVIATION'] == team_abbr]
