@@ -114,7 +114,8 @@ def get_recent_game(team_abbr, days_back=1):
             gamefinder = leaguegamefinder.LeagueGameFinder(
                 team_id_nullable=None,
                 date_from_nullable=date_from.strftime('%m/%d/%Y'),
-                date_to_nullable=date_to.strftime('%m/%d/%Y')
+                date_to_nullable=date_to.strftime('%m/%d/%Y'),
+                timeout=60
             )
             
             games = gamefinder.get_data_frames()[0]
