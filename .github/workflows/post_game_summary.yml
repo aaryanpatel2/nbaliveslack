@@ -76,4 +76,5 @@ jobs:
         git config --local user.name "github-actions[bot]"
         git add last_notified_game.txt
         git diff --quiet && git diff --staged --quiet || git commit -m "chore: update last notified game ID"
+        git pull --rebase
         git push
