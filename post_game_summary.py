@@ -143,5 +143,57 @@ def main():
     send_slack_message(msg)
     with open(notified_file, 'w') as f: f.write(str(game_id))
 
-if __name__ == "__main__":
-    main()
+def main():
+    parser = argparse.ArgumentParser(description='Send NBA post-game stat summary to Slack')
+    # Add all arguments that GitHub Action needs
+    parser.add_argument('--team', default='OKC Thunder', help='Team name')
+    parser.add_argument('--stat', default='3pt', choices=['3pt', 'fg', 'ft'], help='Stat type')
+    parser.add_argument('--days-back', type=int, default=1, help='Days to look back')
+    
+    args = parser.parse_args()
+    
+    team_abbr = TEAM_MAPPING.get(args.team, args.team)
+    
+    # Use the scoreboard to find the game
+    print(f"Looking for recent {args.team} ({team_abbr}) game...")
+    game_id = get_recent_game_id(team_abbr)
+    
+    if not game_id:
+        print(f"No recent completed game found for {team_abbr} in today's scoreboard.")
+        return
+
+    # De-duplication check
+    notified_file = os.path.join(os.path.dirname(__file__), 'last_notified_game.txt')
+    if os.path.exists(notified_file):
+        with open(notified_file, 'r') as f:
+            if f.read().strip() == str(game_id):
+                print(f"Already notified for game {game_id}, skipping.")
+                return
+
+    # Fetch stats
+    stats = get_live_stats(game_id, team_abbr)
+    if not stats or not stats['all_shooters']:
+        print(f"Stats not available for game {game_id} yet.")
+        return
+
+    # Ranking logic
+    shooters = stats['all_shooters']
+    made_shooters = sorted([s for s in shooters if s['made'] > 0], key=lambda x: (-x['pct'], -x['made']))
+    zero_made_shooters = sorted([s for s in shooters if s['made'] == 0], key=lambda x: x['attempts'])
+    ranked_shooters = made_shooters + zero_made_shooters
+    top = ranked_shooters[0]
+
+    # Format and Send
+    message = f"🏀 *{stats['matchup']}* 🏀\n\n"
+    message += f"*Team 3PT%:* {stats['team_3p']['pct']}% ({stats['team_3p']['made']}/{stats['team_3p']['att']})\n"
+    message += f"*Opponent ({stats['opp_3p']['name']}) 3PT%:* {stats['opp_3p']['pct']}% ({stats['opp_3p']['made']}/{stats['opp_3p']['att']})\n\n"
+    message += f"🏆 *Top 3PT Shooter:* {top['name']} — {top['made']}/{top['attempts']} ({top['pct']}%)\n\n"
+    message += f"📊 *All 3PT Shooters (ranked):*\n"
+    for s in ranked_shooters:
+        message += f"• {s['name']}: {s['made']}/{s['attempts']} ({s['pct']}%)\n"
+
+    send_slack_message(message)
+
+    # Save progress
+    with open(notified_file, 'w') as f:
+        f.write(str(game_id))
