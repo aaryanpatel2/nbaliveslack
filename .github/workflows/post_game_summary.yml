@@ -73,16 +73,16 @@ jobs:
       run: |
         python post_game_summary.py --team "${{ github.event.inputs.team }}" --stat ${{ github.event.inputs.stat }} --days-back ${{ github.event.inputs.days_back }}
     
-    - name: Commit updated notification file
-      run: |
-        git config --local user.email "github-actions[bot]@users.noreply.github.com"
-        git config --local user.name "github-actions[bot]"
-        git add last_notified_game.txt
-        if git diff --staged --quiet; then
-          echo "No changes to commit"
-        else
-          git commit -m "chore: update last notified game ID"
-          # Crucial: Pull with rebase to handle concurrent updates
-          git pull --rebase origin main
-          git push origin main
-        fi
+    # - name: Commit updated notification file
+    #   run: |
+    #     git config --local user.email "github-actions[bot]@users.noreply.github.com"
+    #     git config --local user.name "github-actions[bot]"
+    #     git add last_notified_game.txt
+    #     if git diff --staged --quiet; then
+    #       echo "No changes to commit"
+    #     else
+    #       git commit -m "chore: update last notified game ID"
+    #       # Crucial: Pull with rebase to handle concurrent updates
+    #       git pull --rebase origin main
+    #       git push origin main
+    #     fi
