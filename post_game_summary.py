@@ -17,6 +17,16 @@ slack_user = os.getenv("SLACK_USER_ID")
 
 client = WebClient(token=slack_token)
 
+HEADERS = {
+    'Host': 'stats.nba.com',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Referer': 'https://www.nba.com/',
+    'Origin': 'https://www.nba.com',
+    'Connection': 'keep-alive',
+}
+
 # Team name to abbreviation mapping
 TEAM_MAPPING = {
     'OKC Thunder': 'OKC',
@@ -115,7 +125,8 @@ def get_recent_game(team_abbr, days_back=1):
                 team_id_nullable=None,
                 date_from_nullable=date_from.strftime('%m/%d/%Y'),
                 date_to_nullable=date_to.strftime('%m/%d/%Y'),
-                timeout=60
+                timeout=60,
+                headers=HEADERS
             )
             
             games = gamefinder.get_data_frames()[0]
@@ -259,7 +270,8 @@ def main():
                 team_id_nullable=None,
                 date_from_nullable=date_from.strftime('%m/%d/%Y'),
                 date_to_nullable=date_to.strftime('%m/%d/%Y'),
-                timeout=60
+                timeout=60,
+                headers=HEADERS
             )
             games = gamefinder.get_data_frames()[0]
             team_games = games[games['TEAM_ABBREVIATION'] == team_abbr]

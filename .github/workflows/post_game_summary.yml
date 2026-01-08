@@ -82,8 +82,7 @@ jobs:
           echo "No changes to commit"
         else
           git commit -m "chore: update last notified game ID"
-          # Try to push with retries
-          for i in {1..3}; do
-            git pull --rebase origin main && git push origin main && break || sleep 2
-          done
+          # Crucial: Pull with rebase to handle concurrent updates
+          git pull --rebase origin main
+          git push origin main
         fi
