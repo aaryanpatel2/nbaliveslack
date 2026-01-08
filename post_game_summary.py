@@ -5,6 +5,7 @@ from nba_api.stats.endpoints import leaguegamefinder
 from nba_api.live.nba.endpoints import boxscore as live_boxscore
 from datetime import datetime, timedelta
 import argparse
+import time
 
 load_dotenv()
 
@@ -95,88 +96,111 @@ def get_team_abbreviation(team_name):
 
 def get_recent_game(team_abbr, days_back=1):
     """Get the most recent completed game for a team."""
-    try:
-        # Search for games in the last few days
-        date_to = datetime.now()
-        date_from = date_to - timedelta(days=days_back)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Added delay to avoid rate limiting
+            if attempt > 0:
+                wait_time = 2 ** attempt  # Exponential backoff
+                print(f"Retry attempt {attempt + 1}/{max_retries} after {wait_time}s delay...")
+                time.sleep(wait_time)
+            
+            # Search for games in the last few days
+            date_to = datetime.now()
+            date_from = date_to - timedelta(days=days_back)
+            
+            print(f"Searching for games between {date_from.strftime('%m/%d/%Y')} and {date_to.strftime('%m/%d/%Y')}")
+            
+            gamefinder = leaguegamefinder.LeagueGameFinder(
+                team_id_nullable=None,
+                date_from_nullable=date_from.strftime('%m/%d/%Y'),
+                date_to_nullable=date_to.strftime('%m/%d/%Y')
+            )
+            
+            games = gamefinder.get_data_frames()[0]
+            
+            print(f"Total games found: {len(games)}")
+            
+            # Filter for the specific team
+            team_games = games[games['TEAM_ABBREVIATION'] == team_abbr]
+            
+            print(f"Games for {team_abbr}: {len(team_games)}")
+            if not team_games.empty:
+                print(f"Most recent game details:")
+                print(f"  Game ID: {team_games.iloc[0]['GAME_ID']}")
+                print(f"  Date: {team_games.iloc[0]['GAME_DATE']}")
+                print(f"  Matchup: {team_games.iloc[0]['MATCHUP']}")
+            
+            if team_games.empty:
+                return None
+            
+            # Get the most recent game
+            most_recent = team_games.iloc[0]
+            return most_recent['GAME_ID']
         
-        print(f"Searching for games between {date_from.strftime('%m/%d/%Y')} and {date_to.strftime('%m/%d/%Y')}")
-        
-        gamefinder = leaguegamefinder.LeagueGameFinder(
-            team_id_nullable=None,
-            date_from_nullable=date_from.strftime('%m/%d/%Y'),
-            date_to_nullable=date_to.strftime('%m/%d/%Y')
-        )
-        
-        games = gamefinder.get_data_frames()[0]
-        
-        print(f"Total games found: {len(games)}")
-        
-        # Filter for the specific team
-        team_games = games[games['TEAM_ABBREVIATION'] == team_abbr]
-        
-        print(f"Games for {team_abbr}: {len(team_games)}")
-        if not team_games.empty:
-            print(f"Most recent game details:")
-            print(f"  Game ID: {team_games.iloc[0]['GAME_ID']}")
-            print(f"  Date: {team_games.iloc[0]['GAME_DATE']}")
-            print(f"  Matchup: {team_games.iloc[0]['MATCHUP']}")
-        
-        if team_games.empty:
-            return None
-        
-        # Get the most recent game
-        most_recent = team_games.iloc[0]
-        return most_recent['GAME_ID']
+        except Exception as e:
+            print(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt == max_retries - 1:
+                print(f"All retries exhausted. Error finding recent game: {e}")
+                return None
     
-    except Exception as e:
-        print(f"Error finding recent game: {e}")
-        return None
+    return None
 
 def get_game_stats(game_id, team_abbr, stat_type='3pt'):
     """Get player statistics for a specific game and stat type."""
-    try:
-        print(f"Fetching live boxscore for game {game_id}, team {team_abbr}")
-        box = live_boxscore.BoxScore(game_id)
-        data = box.game.get_dict()
-        # Find team info
-        teams = data['homeTeam'], data['awayTeam']
-        team = next(t for t in teams if t['teamTricode'] == team_abbr)
-        opp = next(t for t in teams if t['teamTricode'] != team_abbr)
-        # Team 3pt stats
-        team_3pm = team['statistics']['threePointersMade']
-        team_3pa = team['statistics']['threePointersAttempted']
-        team_3p_pct = round(100 * team_3pm / team_3pa, 1) if team_3pa > 0 else 0.0
-        opp_3pm = opp['statistics']['threePointersMade']
-        opp_3pa = opp['statistics']['threePointersAttempted']
-        opp_3p_pct = round(100 * opp_3pm / opp_3pa, 1) if opp_3pa > 0 else 0.0
-        # Player stats
-        players = team['players']
-        shooters = [
-            {
-                'name': p['name'],
-                'made': p['statistics']['threePointersMade'],
-                'attempts': p['statistics']['threePointersAttempted'],
-                'pct': round(100 * p['statistics']['threePointersMade'] / p['statistics']['threePointersAttempted'], 1) if p['statistics']['threePointersAttempted'] > 0 else 0.0
-            }
-            for p in players if p['statistics']['threePointersAttempted'] > 0
-        ]
-        if not shooters:
-            return None, STAT_CONFIGS['3pt']
-        shooters = sorted(shooters, key=lambda x: (-x['pct'], -x['made']))
-        top_shooter = shooters[0]
-        return {
-            'matchup': f"{team['teamName']} vs {opp['teamName']}",
-            'team_3p': {'pct': team_3p_pct, 'made': team_3pm, 'att': team_3pa},
-            'opp_3p': {'pct': opp_3p_pct, 'made': opp_3pm, 'att': opp_3pa, 'name': opp['teamName']},
-            'top_shooter': top_shooter,
-            'all_shooters': shooters
-        }, STAT_CONFIGS['3pt']
-    except Exception as e:
-        print(f"Error getting game stats: {e}")
-        import traceback
-        traceback.print_exc()
-        return None, None
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                wait_time = 2 ** attempt
+                print(f"Retry attempt {attempt + 1}/{max_retries} after {wait_time}s delay...")
+                time.sleep(wait_time)
+            
+            print(f"Fetching live boxscore for game {game_id}, team {team_abbr}")
+            box = live_boxscore.BoxScore(game_id)
+            data = box.game.get_dict()
+            # Find team info
+            teams = data['homeTeam'], data['awayTeam']
+            team = next(t for t in teams if t['teamTricode'] == team_abbr)
+            opp = next(t for t in teams if t['teamTricode'] != team_abbr)
+            # Team 3pt stats
+            team_3pm = team['statistics']['threePointersMade']
+            team_3pa = team['statistics']['threePointersAttempted']
+            team_3p_pct = round(100 * team_3pm / team_3pa, 1) if team_3pa > 0 else 0.0
+            opp_3pm = opp['statistics']['threePointersMade']
+            opp_3pa = opp['statistics']['threePointersAttempted']
+            opp_3p_pct = round(100 * opp_3pm / opp_3pa, 1) if opp_3pa > 0 else 0.0
+            # Player stats
+            players = team['players']
+            shooters = [
+                {
+                    'name': p['name'],
+                    'made': p['statistics']['threePointersMade'],
+                    'attempts': p['statistics']['threePointersAttempted'],
+                    'pct': round(100 * p['statistics']['threePointersMade'] / p['statistics']['threePointersAttempted'], 1) if p['statistics']['threePointersAttempted'] > 0 else 0.0
+                }
+                for p in players if p['statistics']['threePointersAttempted'] > 0
+            ]
+            if not shooters:
+                return None, STAT_CONFIGS['3pt']
+            shooters = sorted(shooters, key=lambda x: (-x['pct'], -x['made']))
+            top_shooter = shooters[0]
+            return {
+                'matchup': f"{team['teamName']} vs {opp['teamName']}",
+                'team_3p': {'pct': team_3p_pct, 'made': team_3pm, 'att': team_3pa},
+                'opp_3p': {'pct': opp_3p_pct, 'made': opp_3pm, 'att': opp_3pa, 'name': opp['teamName']},
+                'top_shooter': top_shooter,
+                'all_shooters': shooters
+            }, STAT_CONFIGS['3pt']
+        except Exception as e:
+            print(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt == max_retries - 1:
+                print(f"All retries exhausted. Error getting game stats: {e}")
+                import traceback
+                traceback.print_exc()
+                return None, None
+    
+    return None, None
 
 def format_game_summary(stats, stat_config, team_name):
     """Format the game summary message."""
@@ -213,20 +237,40 @@ def main():
     
     print(f"Looking for recent {args.team} ({team_abbr}) game...")
     
+    # Add initial delay for NBA API
+    time.sleep(1)
+    
     # Find the most recent game with available boxscore stats
     date_to = datetime.now()
     date_from = date_to - timedelta(days=args.days_back)
-    gamefinder = leaguegamefinder.LeagueGameFinder(
-        team_id_nullable=None,
-        date_from_nullable=date_from.strftime('%m/%d/%Y'),
-        date_to_nullable=date_to.strftime('%m/%d/%Y')
-    )
-    games = gamefinder.get_data_frames()[0]
-    team_games = games[games['TEAM_ABBREVIATION'] == team_abbr]
-    if team_games.empty:
+    
+    max_retries = 3
+    team_games = None
+    
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                wait_time = 2 ** attempt
+                print(f"Retry attempt {attempt + 1}/{max_retries} after {wait_time}s delay...")
+                time.sleep(wait_time)
+            
+            gamefinder = leaguegamefinder.LeagueGameFinder(
+                team_id_nullable=None,
+                date_from_nullable=date_from.strftime('%m/%d/%Y'),
+                date_to_nullable=date_to.strftime('%m/%d/%Y')
+            )
+            games = gamefinder.get_data_frames()[0]
+            team_games = games[games['TEAM_ABBREVIATION'] == team_abbr]
+            break  # Success, exit retry loop
+        except Exception as e:
+            print(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt == max_retries - 1:
+                print(f"Failed to fetch games after {max_retries} attempts. Exiting gracefully.")
+                return
+    
+    if team_games is None or team_games.empty:
         message = f"No recent game found for {args.team} in the last {args.days_back} day(s)."
         print(message)
-        send_slack_message(message)
         return
 
     # Read last notified game ID
