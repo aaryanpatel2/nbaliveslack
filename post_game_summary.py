@@ -2,15 +2,29 @@ import os
 import sys
 import time
 import argparse
-from datetime import datetime
+import json
+import re
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+import requests
 
 # New Live Endpoints
 from nba_api.live.nba.endpoints import scoreboard, boxscore
 
 load_dotenv()
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.nba.com/",
+    "Origin": "https://www.nba.com",
+}
+
+PAGE_HEADERS = {
+    "User-Agent": HEADERS["User-Agent"],
+}
 
 # Configuration & Mappings
 slack_token = os.getenv("SLACK_BOT_TOKEN")
@@ -35,53 +49,67 @@ def send_slack_message(text):
     except SlackApiError as e:
         print(f"Slack error: {e.response['error']}")
 
-def get_recent_game_id(team_abbr):
-    """Uses the CDN scoreboard to find a recently completed game."""
-    max_retries = 3
-    for attempt in range(max_retries):
+
+def get_game_cards_for_date(game_date):
+    """Fetches all game cards for a specific NBA games page date."""
+    url = f"https://www.nba.com/games?date={game_date}"
+    response = requests.get(url, headers=PAGE_HEADERS, timeout=20)
+    response.raise_for_status()
+
+    match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', response.text, re.S)
+    if not match:
+        return []
+
+    data = json.loads(match.group(1))
+    page_props = data.get('props', {}).get('pageProps', {})
+    game_feed = page_props.get('gameCardFeed', {})
+    modules = game_feed.get('modules', [])
+
+    cards = []
+    for module in modules:
+        for card in module.get('cards', []):
+            card_data = card.get('cardData', {})
+            if isinstance(card_data, dict) and card_data.get('gameId'):
+                cards.append(card_data)
+
+    return cards
+
+def get_recent_game_id(team_abbr, days_back=1):
+    """Finds the most recent completed game for a team across the requested date window."""
+    return get_recent_game_id_for_days(team_abbr, days_back)
+
+
+def get_recent_game_id_for_days(team_abbr, days_back):
+    """Searches today's games page and prior days for the most recent completed game."""
+    max_days_back = max(0, days_back)
+    for offset in range(0, max_days_back + 1):
+        game_date = datetime.now().date() - timedelta(days=offset)
+        game_date_str = game_date.isoformat()
         try:
-            if attempt > 0:
-                wait_time = 5 * (attempt + 1)
-                print(f"Retry attempt {attempt + 1}/{max_retries} after {wait_time}s delay...")
-                time.sleep(wait_time)
-            
-            print(f"Fetching scoreboard from CDN...")
+            print(f"Fetching NBA games page for {game_date_str}...")
             start_time = time.time()
-            
-            sb = scoreboard.ScoreBoard()
-            data = sb.get_dict()
-            
+            cards = get_game_cards_for_date(game_date_str)
             elapsed = time.time() - start_time
-            print(f"Scoreboard fetched in {elapsed:.2f}s")
-            
-            games = data.get('scoreboard', {}).get('games', [])
-            print(f"Found {len(games)} games in today's scoreboard")
-            
-            for game in games:
-                home = game['homeTeam']['teamTricode']
-                away = game['awayTeam']['teamTricode']
+            print(f"Games page fetched in {elapsed:.2f}s")
+            print(f"Found {len(cards)} game card(s) for {game_date_str}")
+
+            for game in cards:
+                home = game.get('homeTeam', {}).get('teamTricode')
+                away = game.get('awayTeam', {}).get('teamTricode')
                 if team_abbr in [home, away]:
-                    game_status = game['gameStatus']
-                    game_id = game['gameId']
+                    game_status = game.get('gameStatus')
+                    game_id = game.get('gameId')
                     print(f"Found {team_abbr} game: {game_id} (status={game_status})")
-                    # gameStatus 3 means the game is finished
                     if game_status == 3:
                         print(f"Game {game_id} is completed")
                         return game_id
-                    else:
-                        print(f"Game {game_id} not yet complete (status={game_status})")
-            
-            print(f"No completed games found for {team_abbr}")
-            return None
-            
+                    print(f"Game {game_id} not yet complete (status={game_status})")
         except Exception as e:
-            print(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
+            print(f"Lookup for {game_date_str} failed: {e}")
             import traceback
             traceback.print_exc()
-            if attempt == max_retries - 1:
-                print(f"All retries exhausted for scoreboard")
-                return None
-    
+
+    print(f"No completed games found for {team_abbr}")
     return None
 
 def get_live_stats(game_id, team_abbr):
@@ -97,7 +125,7 @@ def get_live_stats(game_id, team_abbr):
             print(f"Fetching boxscore for game {game_id} from CDN...")
             start_time = time.time()
             
-            box = boxscore.BoxScore(game_id)
+            box = boxscore.BoxScore(game_id, headers=HEADERS)
             data = box.get_dict()['game']
             
             elapsed = time.time() - start_time
@@ -166,7 +194,7 @@ def main():
     
     # Use the scoreboard to find the game
     print(f"Looking for recent {args.team} ({team_abbr}) game...")
-    game_id = get_recent_game_id(team_abbr)
+    game_id = get_recent_game_id(team_abbr, args.days_back)
     
     if not game_id:
         print(f"No recent completed game found for {team_abbr} in today's scoreboard.")

@@ -1,7 +1,6 @@
 import os
 from dotenv import load_dotenv
 from nba_api.live.nba.endpoints import scoreboard
-from nba_api.stats.endpoints import scoreboardv2
 from nba_api.live.nba.endpoints import playbyplay
 from datetime import datetime, timezone
 import time
@@ -19,6 +18,14 @@ slack_token = os.getenv("SLACK_BOT_TOKEN")
 slack_user = os.getenv("SLACK_USER_ID")
 
 client = WebClient(token=slack_token)
+
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.nba.com/",
+    "Origin": "https://www.nba.com",
+}
 
 def message(play):
     try:
@@ -42,16 +49,14 @@ def get_games_today():
         print("--- RUNNING IN TEST MODE ---")
         return [{'game_id': TEST_PAST_GAME_ID, 'start_time_utc': TEST_START_TIME}]
     else:
-        today_str = datetime.now().strftime('%m/%d/%Y')
-        score = scoreboardv2.ScoreboardV2(game_date=today_str)
-        games_today_data = score.get_normalized_dict()['GameHeader']
+        score = scoreboard.ScoreBoard(headers=HEADERS)
+        games_today_data = score.get_dict()['scoreboard']['games']
         games = []
         for game in games_today_data:
-            game_id = game['GAME_ID']
-            est_time_str = game['GAME_DATE_EST']
-            start_time_est = datetime.fromisoformat(est_time_str)
-            start_time_local = start_time_est.astimezone()  # Converts to local time
-            games.append({'game_id': game_id, 'start_time_utc': start_time_est, 'start_time_local': start_time_local})
+            game_id = game['gameId']
+            start_time_utc = datetime.fromisoformat(game['gameTimeUTC'].replace('Z', '+00:00'))
+            start_time_local = start_time_utc.astimezone()  # Converts to local time
+            games.append({'game_id': game_id, 'start_time_utc': start_time_utc, 'start_time_local': start_time_local})
         return games
 
 def get_live_play_by_play(game_id, use_normalized=True):
@@ -60,7 +65,7 @@ def get_live_play_by_play(game_id, use_normalized=True):
     Can return data in normalized or regular format.
     """
     try:
-        pbp = playbyplay.PlayByPlay(game_id)
+        pbp = playbyplay.PlayByPlay(game_id, headers=HEADERS)
         if use_normalized:
             plays = pbp.get_dict()['game']['actions']
             return plays
@@ -73,11 +78,11 @@ def is_game_live(game_id):
     if TEST_MODE and game_id == TEST_PAST_GAME_ID:
         return True  # In test mode, the past game is always "live"
     else:
-        score = scoreboard.ScoreBoard()
+        score = scoreboard.ScoreBoard(headers=HEADERS)
         games = score.get_dict()['scoreboard']['games']
         for game in games:
-            # gameStatus 3 means finished
-            if game['gameId'] == game_id and game['gameStatus'] != 3:
+            # gameStatus 2 means in progress
+            if game['gameId'] == game_id and game['gameStatus'] == 2:
                 return True
         return False
 
@@ -87,7 +92,7 @@ def is_game_over(game_id):
     if TEST_MODE and game_id == TEST_PAST_GAME_ID:
         return False
     else:
-        score = scoreboard.ScoreBoard()
+        score = scoreboard.ScoreBoard(headers=HEADERS)
         games = score.get_dict()['scoreboard']['games']
         for game in games:
             # gameStatus 3 means finished
